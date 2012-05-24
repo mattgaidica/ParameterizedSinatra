@@ -1,0 +1,33 @@
+Parameterizing SQL Queries with ActiveRecord
+
+ActiveRecord can be a nice way to make querying a database easy, object-friendly, and language-independent. The two restrictions in ever using pure SQL statements is that you can no longer make use of ActiveRecords language independent schema, and your statements are no longer sanitized, or parameterized by default. Consider an education example, a course has one teacher, and many books that are required.
+
+class Book < ActiveRecord::Base
+  belongs_to :course
+end
+
+class Course < ActiveRecord::Base
+  belongs_to :teacher
+  has_many :books
+end
+
+class Teacher < ActiveRecord::Base
+  has_many :courses
+end
+Suppose we want a query to find a particular course’s teacher. Under a RESTful protcol, this would be a GET request located at “/course/:id/teacher” where the “:id” will be available as a parameter in Sinatra.
+
+Course.find(:first, params[:id]).teacher
+Teacher.find_by_sql(["SELECT teachers.* FROM teachers INNER JOIN courses ON courses.teacher_id = teachers.id WHERE courses.id = ?", params[:id]]).first
+These will produce the exact same results, however you notice they syntaxually very different. The important thing to note is that in the SQL version, the course id has been properly paramterized, eliminating all possibilities of SQL injection. 
+
+Next, let’s find all of the books a teacher would need for all their courses, but only return the book’s ISBN and the course’s title. In a RESTful API, this would be found at “/teacher/:id/books”.
+
+Book.select("isbn").joins(:course => :teacher).where(:teachers => {:id => params[:id]})
+Book.find_by_sql(["SELECT isbn FROM books INNER JOIN courses ON courses.id = books.course_id INNER JOIN teachers ON teachers.id = courses.teacher_id WHERE teachers.id = ?", params[:id]])
+For a final relationship, let’s take a look at a search query, where we allow the user to specify the column and value they are looking for on a book. For the data in this example, it would be appropriate that a user may want to search for a book with an ISBN equal to a certain value. This presents a problem for the SQL statement because we must escape both parameters (column, value), however the column should not turn into a string! The rule, “single quote for strings, double quote for things” comes into play. The one way around this that I have found is to first escape the parameter with ActiveRecord, replace the outer single quotes with double quotes, and then inject the newly created string into the SQL statement.
+
+Book.where(params[:column] => params[:value])
+col = '"' + ActiveRecord::Base.sanitize(params[:column]).chop.reverse.chop.reverse + '"'
+
+Book.find_by_sql(["SELECT * FROM books WHERE #{col} = ?", params[:value]])
+I am still not sure this is a great approach for escaping, manual replacing of characters is a bad thing in almost all cases. If you were not already sold on ActiveRecord, I hope this has helped you join the [winning] team.
